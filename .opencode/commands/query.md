@@ -3,7 +3,7 @@ description: Translate a natural language prompt into SQL, run it with DuckDB, a
 ---
 
 Answer a question about data by translating it to SQL and executing it with
-DuckDB. Load the **duckdb** skill before writing any SQL.
+DuckDB. If a DuckDB skill is available, load it before writing any SQL.
 
 ## Process
 

@@ -110,7 +110,7 @@ a DuckDB one-liner is faster than writing a script:
 duckdb -markdown -c "SELECT ... FROM 'data.parquet' ..."
 ```
 
-Load the **duckdb** skill if you need a refresher on syntax.
+If a DuckDB skill is available, load it when you need a refresher on syntax.
 
 ### Nushell — for structured data questions
 

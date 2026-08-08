@@ -1,0 +1,15 @@
+*
+
+!/.gitignore
+!/LICENSE
+!/README.md
+
+!/skills/
+!/skills/*/
+!/skills/*/SKILL.md
+!/skills/*/references/
+!/skills/*/references/*.md
+
+!/.opencode/
+!/.opencode/commands/
+!/.opencode/commands/*.md

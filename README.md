@@ -16,6 +16,7 @@ A small collection of reusable guidance I use with my coding agents. Each skill 
 | [`jj-preemptive-conflict-resolution`](skills/jj-preemptive-conflict-resolution/SKILL.md) | Resolving or avoiding difficult conflicts in a Jujutsu commit graph.         |
 | [`local-ci`](skills/local-ci/SKILL.md)                                                   | Developing and testing GitHub Actions workflows locally with `wrkflw`.       |
 | [`logging`](skills/logging/SKILL.md)                                                     | Adding useful structured logging based on wide events.                       |
+| [`performance-design`](skills/performance-design/SKILL.md)                               | Preserving a high performance ceiling during architecture and planning.      |
 | [`self-doubt`](skills/self-doubt/SKILL.md)                                               | Stress-testing a proposed solution before committing to it.                  |
 
 ## Installing

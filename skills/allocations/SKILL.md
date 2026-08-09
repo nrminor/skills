@@ -1,20 +1,32 @@
 ---
 name: allocations
-description: Audit and reduce heap/dynamic allocations in Rust, TypeScript/JavaScript, and Python. Covers profiling tools, stack-only alternatives, zero-copy patterns, and cache-friendly design. Use when analyzing allocation-heavy code or optimizing memory performance.
+description: Audit and reduce heap/dynamic allocations in Rust, TypeScript/JavaScript, and Python after architecture is fixed or measurements identify allocation pressure. Covers allocation profiling, buffer reuse, clone reduction, pooling, stack and inline storage, zero-copy patterns, and runtime-specific tuning. For pre-implementation architecture, data layout, batching, cache locality, SIMD, data movement, or performance ceilings, load performance-design first.
 ---
 
 # Heap Allocation Audit Skill
 
 Guidance for identifying and reducing unnecessary heap allocations across Rust,
-TypeScript/JavaScript, and Python. Organized by refactor complexity.
+TypeScript/JavaScript, and Python. This is a local tuning and salvage skill.
+
+> [!IMPORTANT]
+> Thinking about allocations alone only gets you so far. If data representation,
+> ownership, API shape, or processing architecture can still change, load
+> **performance-design** first. A pointer-heavy or object-per-item architecture
+> may have a low local optimization ceiling: fewer clones and better buffer reuse
+> help, but step-change gains require a bigger-picture redesign.
 
 ## General Principles
 
-1. **Profile first.** Never optimize blindly. Measure allocations, identify hot paths.
-2. **Allocation is not free.** Every heap allocation costs cycles for bookkeeping.
-3. **Cache locality matters.** Scattered allocations cause cache misses.
-4. **Dependencies have costs.** Adding a crate/package for one type may not be worth it.
-5. **Clarity vs. performance.** Focus on hot paths where allocations measurably hurt.
+1. **Classify the scope.** Use **performance-design** while architecture is
+   malleable; use this skill when doing local tuning inside an accepted design.
+2. **Measure local work.** Profile allocations and benchmark representative hot
+   paths before choosing among local fixes.
+3. **Allocation topology matters.** A few large allocations usually behave very
+   differently from many independently managed objects.
+4. **Cache locality matters.** Scattered allocations cause indirection and cache
+   misses beyond allocator bookkeeping alone.
+5. **Dependencies have costs.** Adding a crate or package for one specialized
+   container may not earn its maintenance burden.
 
 ## Detailed References
 
@@ -152,24 +164,29 @@ python -m memory_profiler script.py
 
 # Audit Checklist
 
-1. **Identify hot paths** — Where does execution time concentrate?
-2. **Profile allocations** — Use language-appropriate tools
-3. **Categorize**:
+1. **Classify the problem** — Architectural performance ceiling or local
+   allocation tuning? Load **performance-design** for the former.
+2. **Identify hot paths** — Where does execution time concentrate?
+3. **Profile allocations** — Use language-appropriate tools.
+4. **Categorize**:
    - Necessary (can't avoid)
    - Reducible (reuse, pool, pre-allocate)
    - Eliminable (stack, views, references)
-4. **Prioritize by impact** — High-frequency allocations first
-5. **Consider tradeoffs** — Clarity, maintainability, dependencies
+5. **Prioritize by impact** — High-frequency allocations first.
+6. **Consider tradeoffs** — Clarity, maintainability, and dependencies.
 
 ## When NOT to Optimize
 
-- **Cold paths** — Rarely-run code doesn't need optimization
-- **Premature** — Profile first; intuition is often wrong
-- **Readability sacrifice** — Maintenance cost may exceed benefit
-- **Dependency bloat** — Don't add crates for marginal gains
+- **Architecture is still malleable** — Use **performance-design** before local
+  tuning so representation choices do not cap the possible gain.
+- **Cold paths** — Rarely-run code seldom deserves intricate local tuning.
+- **No credible workload** — Preserve simple, favorable representations rather
+  than adding speculative machinery.
+- **Readability sacrifice** — Maintenance cost may exceed a marginal gain.
+- **Dependency bloat** — Don't add crates for marginal gains.
 
 ## Escalation
 
 - **Detailed profiling**: Consult **documentation-nerd**
-- **Architectural redesign**: Consult **architecture-advice**
+- **Architectural performance**: Load **performance-design**
 - **Testing optimized code**: Consult **testing-guru**

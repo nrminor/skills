@@ -1,363 +1,427 @@
 ---
 name: jj
-description: Jujutsu (jj) version control for the user's preferred workflow — graph-aware, describe-first, split-oriented, with stacked PRs. Use when working with jj repositories, manipulating the commit graph, creating PRs, or any version control operation in a jj repo.
+description: Use when working in a jj repository, coordinating agents with jj workspaces, changing commit graphs, managing bookmarks or remotes, or creating stacked PRs. Encodes the user's snapshot-first, curate-before-handoff workflow.
 ---
 
 # Jujutsu (jj) Version Control
 
 jj is a version control system built on a mutable directed acyclic graph of
-commits. That sentence is the most important thing in this skill. Everything
-else follows from it: every operation you perform — new, describe, split,
-rebase, bookmark — is a graph manipulation. Your job is to understand the graph,
-reason about it, and transform it.
+commits. Treat commits as cheap snapshots while work evolves, then mold the
+provisional graph into a small, comprehensible set of review units.
 
-## Before Doing Anything: Read the Graph
+The graph may be messy during exploration. It must be curated before handoff:
 
-**Always run `jj status` and `jj log` before performing any operation.** This is
-not optional. You need to know:
+```text
+explore                       curate                         present
+-------                       ------                         -------
+snapshot uncertain work ->    abandon / split / squash  ->  describe
+branch by dependency          rebase / reorder               verify each unit
+avoid premature labels        preserve real topology         bookmark PR/RC heads
+```
 
-- What changes are in the working copy (`@`)
-- What the commit graph looks like — parent/child relationships, where bookmarks
-  point, what's been pushed to remotes
-- Whether there are conflicts (marked with `×` in the log)
-- Whether bookmarks are divergent (marked with `??`)
+## Read the Graph First
+
+Run all three commands before changing the graph.
 
 ```bash
-jj status    # Working copy state — what files changed, any conflicts
-jj log       # The commit graph — topology, bookmarks, descriptions
-```
-
-If you skip this step and start making changes blind, you will make mistakes.
-The graph is your map. Read it first.
-
-## The User's Workflow: Describe-First, Split-Later
-
-This is how the user works. Internalize it:
-
-1. **Start a new commit and declare intent.** `jj new` to create a fresh
-   working copy commit, then `jj describe -m "feat: implement X"` to state what
-   this commit will contain. The description is a contract — it says what the
-   commit is _for_ before any code is written.
-
-2. **Implement.** Write code in the working copy. jj tracks everything
-   automatically — there's no staging area.
-
-3. **Split if the commit grew too large.** If the implementation touched more
-   than one logical concern, use `jj split` to carve out separate commits. Each
-   resulting commit should be a focused, standalone unit.
-
-4. **Each commit must be a standalone unit.** It compiles. It passes checks. It
-   passes tests. This is non-negotiable — it enables `jj bisect` and keeps the
-   history useful. Never create fragmentary commits that only make sense as part
-   of a sequence.
-
-The user does **not** typically work by creating many tiny `jj new` commits and
-squashing them together. The direction is: one commit that grows, then split
-into focused pieces. `jj squash` is used occasionally but is not the primary
-tool.
-
-## Core Commands
-
-### Creating and Describing Commits
-
-⚠️ **Do not reflexively run `jj new -m "..."`.** The user will almost always
-have already created a new empty commit at the right point in the graph before
-handing off to you. If you run `jj new -m` without checking, you'll leave
-behind an empty commit. **Always `jj status` first** to see whether `@` is
-already an empty commit waiting to be described. If it is, use `jj describe`,
-not `jj new`.
-
-When writing commit descriptions with `jj describe`, **review recent commits
-first** (`jj log -r '::@' --limit 10` or similar) to match the style the user
-has been using. Don't impose a commit message convention; follow the one that's
-already in the history.
-
-**Commit descriptions have two parts:**
-
-1. **A short summary line** that fits neatly in `jj log` output — concise
-   enough to scan at a glance. This is the first line of the description.
-
-2. **A detailed body** separated from the summary by a blank line. The body
-   should exhaustively describe what changed and why, organized into sections
-   with blank lines between them. Write it almost like a short blog post — it
-   should be readable on its own and provide enough context that someone
-   encountering this commit in a `jj show` or a PR description understands the
-   full picture without needing to read the diff. Each commit should be able to
-   serve as its own PR description if needed.
-
-```bash
-jj new                        # New empty working copy commit on top of @
-jj new <parent>               # New commit with specific parent
-jj new <parent1> <parent2>    # New merge commit with multiple parents
-jj describe -m "message"      # Set description of working copy (@)
-jj describe -r <id> -m "msg"  # Set description of a specific commit
-jj commit -m "message"        # Shorthand: describe @ and create new @
-```
-
-IMPORTANT: in most cases, it is wasteful of tokens to propose a commit
-description and then run `jj describe -m ""` when the user will need to give
-permission for the command anyway. **Just run `jj describe -m ""` directly with
-your commit message** and allow the normal command permission model to serve as
-the proposal. If the description is insufficient for any reason, the user will
-reject it with feedback.
-
-### Splitting and Squashing
-
-```bash
-jj split                      # Interactively split @ into two commits
-jj split -r <id>              # Split a specific commit
-jj squash                     # Squash @ into its parent
-jj squash -r <id>             # Squash a specific commit into its parent
-jj squash --into <id>         # Squash @ into a specific target commit
-```
-
-### Rebasing
-
-Rebase is the most common graph operation after describe. The user works with
-stacked commits and stacked PRs, which means rebase comes up constantly —
-especially after fetching remote changes or when reordering commits in a stack.
-
-```bash
-jj rebase -d <dest>                  # Rebase @ onto a new parent
-jj rebase -r <id> -d <dest>          # Rebase a single commit (children follow)
-jj rebase -s <id> -d <dest>          # Rebase a commit and all its descendants
-jj rebase -b <id> -d <dest>          # Rebase a commit and all its ancestors
-                                     #   up to the nearest common ancestor with dest
-```
-
-**Anticipate rebase needs.** When you see that `main@origin` has moved ahead of
-the base of a commit stack, or that a PR's bookmark is behind, suggest or
-perform a rebase. Don't wait for the user to notice.
-
-### Bookmarks (Not Branches)
-
-jj uses "bookmarks" where git uses "branches." Bookmarks are pointers to
-commits — they don't auto-advance.
-
-```bash
-jj bookmark create <name>              # Point a bookmark at @
-jj bookmark create <name> -r <id>      # Point at a specific commit
-jj bookmark move <name> --to <id>      # Move a bookmark to a different commit
-jj bookmark delete <name>              # Delete a local bookmark
-jj bookmark list                       # List all bookmarks
-jj bookmark list -a                    # List all bookmarks including remote
-jj bookmark track <name>@<remote>      # Track a remote bookmark locally
-```
-
-### Syncing with Remotes
-
-```bash
-jj git fetch                           # Fetch from all remotes
-jj git push --bookmark <name>          # Push a specific bookmark
-jj git push -c <id>                    # Push a commit (auto-creates bookmark)
-```
-
-The user also has custom commands:
-
-- **`jj tug`** — fetches from remote and rebases the current commit onto the
-  updated remote tracking bookmark. Equivalent to `jj git fetch` followed by a
-  rebase.
-- **`jj tush`** — tug followed by push. The user typically prefers to handle
-  pushing themselves, so don't run `jj tush` or `jj git push` without asking.
-
-### Viewing and Navigating
-
-```bash
-jj status                    # Working copy state
-jj log                       # Commit graph
-jj log -r <revset>           # Filtered view
-jj show <id>                 # Full diff of a commit
-jj diff                      # Working copy diff
-jj diff -r <id>              # Diff of a specific commit
-jj op log                    # Operation history (your undo stack)
-```
-
-**Seeing older commits after pushing.** The default `jj log` revset hides
-commits that have already been pushed to a remote. If you need to see the full
-history leading up to the working copy — for example, to review what was in a
-bookmark before it was pushed, or to find a commit that seems to have
-"disappeared" — use the ancestor revset explicitly:
-
-```bash
-jj log -r '::@' --limit 20   # All ancestors of @, most recent 20
-```
-
-### Undoing and Recovery
-
-```bash
-jj undo                      # Undo the last operation
-jj op log                    # View operation history
-jj op restore <op-id>        # Restore to a specific operation state
-```
-
-⚠️ **Never `jj undo` after `jj git push`.** This creates stale remote state.
-Make forward fixes instead.
-
-## Revsets
-
-Revsets are jj's query language for selecting commits. They're how you express
-"which commits" for any operation.
-
-```bash
-@                    # Working copy
-@-                   # Parent of working copy
-@--                  # Grandparent
-::@                  # All ancestors of @
-@::                  # All descendants of @
-main..@              # Commits reachable from @ but not from main
-main@origin..@       # Commits ahead of remote main
-description("fix")   # Commits whose description contains "fix"
-author("alice")      # Commits by alice
-bookmarks()          # All commits with bookmarks
-```
-
-Revsets are composable with `|` (union), `&` (intersection), and `~` (negation):
-
-```bash
-jj log -r 'main@origin..@ & ~empty()'   # Non-empty commits ahead of remote main
-```
-
-## Stacked PRs
-
-The user frequently works with stacked PRs — multiple commits in a chain, each
-with its own bookmark and its own GitHub PR. The typical structure:
-
-```
-main@origin
-  └── feat-base (bookmark, PR #1)
-        └── feat-part2 (bookmark, PR #2)
-              └── feat-part3 (bookmark, PR #3)
-                    └── @ (working copy)
-```
-
-### Creating a Stack
-
-```bash
-jj new main@origin
-jj describe -m "feat: base infrastructure for X"
-# ... implement ...
-jj bookmark create feat-base
-jj git push --bookmark feat-base
-
-jj new
-jj describe -m "feat: add Y on top of base"
-# ... implement ...
-jj bookmark create feat-part2
-jj git push --bookmark feat-part2
-```
-
-### Updating a Stack After Review Feedback
-
-When you need to change a commit in the middle of a stack:
-
-```bash
-# Edit the commit that needs changes
-jj new <commit-to-fix>
-# ... make fixes ...
-jj squash                    # Squash fixes into the target commit
-
-# All descendants automatically rebase — but check the graph:
+jj status
 jj log
-# Verify no conflicts, then update bookmarks and push
+jj workspace list
 ```
 
-### Rebasing a Stack onto Updated Main
+Establish:
+
+- what is in the current working-copy commit (`@`)
+- which commits this agent created for the current assignment and which came
+  from the user, another agent, collaborators, or `jj git fetch`
+- dependencies, parallel branches, bookmarks, remotes, conflicts (`×`), and
+  divergent changes or bookmarks
+- whether the apparent base is merged, released, or otherwise immutable
+
+## Mutability Boundary: Clean Up After Yourself
+
+Automatically rewrite only commits this agent produced for the current
+assignment. Treat commits from the user, another agent, collaborators, fetched
+remotes, merged history, and released history as immutable unless the user
+explicitly delegates them.
+
+Pre-release feature work that has not merged into main is normally mutable.
+History merged into main is normally immutable. Some solo projects deliberately
+work directly on main, so infer the actual convention from repository context
+rather than treating a branch name as proof.
+
+```text
+current agent's exploratory work      freely mutable
+current agent's pre-merge feature     mutable for curation
+other-owned / fetched / merged        preserve
+released                              preserve
+```
+
+If ownership or publication status is ambiguous, ask before surgery.
+
+Inspect the complete effect of a rewrite, not only the revision named on the
+command line. Abandoning, squashing, splitting, or rebasing an ancestor may
+rewrite descendants; bookmarks may follow, move, or disappear; another
+workspace may become stale. If the affected closure includes protected work,
+an active workspace owned by someone else, or a presentation label outside the
+assignment, coordinate or ask instead of proceeding automatically.
+
+## Explore with Scratch Commits, in Moderation
+
+Use new, usually undescribed commits to ring-fence revisions that may be kept,
+reworked, or abandoned. They are especially valuable when:
+
+- an approach is uncertain
+- a coherent hunk may be discarded independently
+- a risky change deserves a known-good checkpoint
+- parallel agents need independent lines of work
+- starting a hunk over would cost fewer tokens than manually undoing it
+
+```bash
+jj new                         # snapshot current @; continue in a new commit
+jj new <parent>                # start an independent line at a chosen parent
+jj abandon <revision>          # discard a failed scratch revision
+```
+
+Leave scratch commits undescribed by default. This keeps routine squashing
+non-interactive because, when one side has an empty description, jj retains the
+other description without asking how to combine them. Give scratch commits
+short navigational descriptions only when several concurrent or parallel
+revisions would otherwise be hard to distinguish.
+
+This is not a mandate to commit after every action. Keep work in the current
+commit when its changes belong to one review unit and will not need independent
+discard or rollback.
+
+Be unsentimental about failed scratch work. Inspect its descendants and
+bookmarks as well as what the revision contains, then `jj abandon` it or revert
+the operation that introduced it rather than spending tokens painstakingly
+reversing an approach that is cheaper to redo. `jj abandon` rebases descendants
+onto the abandoned revision's parents and deletes bookmarks pointing directly
+to it; use `--restore-descendants` or `--retain-bookmarks` only when those are
+the intended semantics.
+
+## Let Dependencies Determine Topology
+
+Branches are an emergent property of the commit graph, not named containers.
+Make a dependent change a child of its prerequisite. Make independent changes
+siblings of the same base unless repository convention requires a linear stack.
+
+```text
+A depends on B:              B -- A
+
+A independent of B:         +-- A
+                            |
+                        base+
+                            |
+                            +-- B
+
+integration:                A --+
+                                +-- combined child
+                            B --+
+```
+
+Do not linearize independent branches merely to resemble Git history. Respect
+the project's review conventions, however: some teams expect a linear PR stack.
+
+A commit with multiple parents is already a merge commit. Create one directly;
+there is no need for a separate Git-style merge ceremony.
+
+```bash
+jj new <parent1> <parent2>
+```
+
+## Workspaces for Parallel Agents
+
+Use jj workspaces when agents need independent working copies and must traverse
+or rewrite their own commits without fighting over `@`. Workspaces are useful,
+but each may duplicate disk-heavy state such as `node_modules`, virtual
+environments, or Rust `target` directories.
+
+**Ask before creating a workspace.** Name it for its purpose and pass its
+explicit starting revision with `-r`.
+
+```bash
+jj workspace list
+jj workspace add --name <purpose> -r <revision> <path>
+```
+
+Coordinate graph surgery across active workspaces. Before rewriting a shared
+ancestor, tell each affected agent which change IDs will move. After the
+rewrite, each affected agent must run `jj status` and `jj log`. If a workspace's
+working-copy commit was rewritten or abandoned elsewhere and its files are now
+stale, enter that workspace and run `jj workspace update-stale`. If jj reports
+divergent changes, compare both diffs and agree which change to preserve before
+abandoning either one.
+
+When a workspace is no longer needed, ask before forgetting it or deleting its
+working tree. The user may want to reuse the installed dependencies or the
+workspace itself.
+
+```bash
+jj workspace forget <name>    # only after permission; does not delete files
+```
+
+## Curate Before Handoff
+
+A normal agent session is not finished while its completed work remains a pile
+of scratch commits. Before handoff, curate this agent's commits inside the
+mutability boundary. Ask first when an operation would discard a meaningful
+alternative, obscure authorship, cross that boundary, or change external state
+that jj cannot restore.
+
+Curate semantically, not by commit count:
+
+1. Inspect every agent-owned revision, its descendants, active workspaces, and
+   affected bookmarks.
+2. Abandon failed or superseded experiments.
+3. Use `jj squash`, `jj split`, and `jj rebase` to form conceptual review units.
+4. Preserve parallel topology for truly independent work; linearize real
+   dependencies.
+5. Describe the resulting review units in the repository's existing style.
+6. Run every repository-configured build, test, and lint command required for
+   the changed code against each final unit, not only the stack tip.
+7. Read the final graph and diff before reporting or presenting it.
+
+```bash
+jj abandon <revision>
+jj squash -r <revision>        # move a revision into its parent
+jj squash --from <src> --into <dst>
+jj split -r <revision>
+jj split -r <revision> --parallel
+jj rebase -r <revision> -A <after>
+jj rebase -r <revision> -B <before>
+jj rebase -s <root> -o <destination>
+```
+
+Know the reach of each rebase form before using it: `-r` moves only the selected
+revisions and reconnects their descendants; `-s` moves the selected roots and
+all descendants; `-o` leaves the destination's existing descendants where they
+are; `-A` inserts after a target and rebases its descendants onto the inserted
+work; `-B` inserts before a target and rebases the target and its descendants.
+
+`jj squash` and `jj rebase` are the primary sculpting tools. If curation
+combines too much, recover through the operation log or use `jj split` to
+restore the meaningful boundary.
+
+### Final Commit Standard
+
+Each final commit is a conceptual review unit rather than an arbitrary bundle
+of files. Prefer smaller units when they stand alone, but keep coupled changes
+together when splitting would produce misleading or broken intermediates. A
+large commit can be correct when one feature or fix genuinely spans many parts
+of the codebase; a grab bag of unrelated changes is not.
+
+Unless repository policy conflicts, every final commit should:
+
+- express one coherent feature, fix, refactor, or supporting concept
+- build and pass the relevant tests and checks
+- leave the repository in a useful state for bisection
+- describe what changed and why
+
+Review recent descriptions before writing new ones. Match the local style
+instead of imposing a conventional-commits format or a fixed body length.
+
+```bash
+jj log -r '::@' --limit 10
+jj describe -r <revision> -m '<description>'
+```
+
+Use a concise first line that scans well in `jj log`. Add a body when the
+reasoning, tradeoffs, or review context would otherwise be lost. Do not require
+every small commit to read like a blog post.
+
+If the session ends with incomplete work that cannot honestly be curated into
+bisectable review units, preserve it as a clearly labeled scratch stack and
+report its status, risks, and next step. Do not manufacture tidy history that
+misrepresents unfinished work.
+
+## Bookmarks Are Presentation Labels
+
+Commits are cheap and temporary; bookmarks are deliberate labels. Keep the
+graph free to accumulate temporary commits, but do not litter it with half-baked
+bookmarks.
+
+Create or move a bookmark only for an established repository boundary, a
+release candidate, or a commit intended as a PR head.
+Bookmarks do not advance merely because a child commit is created, but they do
+follow their target when jj rewrites that change. They may also be deleted when
+their target is abandoned. Inspect bookmarks after graph surgery.
+
+```bash
+jj bookmark list -a
+jj bookmark create <name> -r <revision>
+jj bookmark move <name> --to <revision>
+jj bookmark track <name>@<remote>
+jj bookmark forget <name>              # local-only removal; untracks remotes
+jj bookmark delete <name>              # schedule remote deletion on next push
+```
+
+Resolve divergent bookmarks (`??`) before pushing. Do not push without the
+user's permission. Moving a bookmark backward or sideways requires
+`--allow-backwards`; use it only after confirming the target.
+
+### Release Candidates Stay at the Tip
+
+A release-candidate commit or bookmark should sit at the tip of the branch of
+changes it presents:
+
+```text
+base -- feature -- fix -- release candidate
+```
+
+If later fixes or features appear above a release-candidate commit, rebase them
+below it while preserving their real dependencies, then leave the release
+candidate at the tip. Keep all affected commits within the mutability boundary.
+If the release candidate is only a bookmark rather than a distinct commit, move
+the bookmark to the curated tip instead.
+
+## The Operation Log Is the Safety Net
+
+Every jj graph operation records an operation. When a rebase, squash, abandon,
+workspace interaction, or other mutation behaves unexpectedly, stop and inspect
+the operation log instead of piling more graph surgery on top.
+
+```bash
+jj op log
+jj undo
+jj --at-op=<operation-id> log
+jj --at-op=<operation-id> status
+jj op revert <operation-id>
+jj op restore <operation-id>
+```
+
+The operation log is shared by the repository's workspaces. Use `jj undo` only
+when the latest operation is the one this agent intends to reverse and no
+concurrent agent operation would be caught with it. Otherwise identify the
+agent-owned operation and prefer `jj op revert <operation-id>`. Inspect candidate
+states with `--at-op`; reserve `jj op restore` for a deliberate repository-wide
+rollback because it reverses all later operations, potentially including work
+from other workspaces.
+
+Restoring jj's local state does not reverse external effects. A Git push, merged
+PR, deleted on-disk workspace, ignored file, installed dependency, generated
+artifact, external service, or deployment remains external. After a push, use
+the operation log to understand local state, then reconcile the remote
+deliberately rather than assuming `jj undo` has un-pushed anything. If a
+post-push restore is truly needed, `jj op restore <operation-id> --what repo`
+avoids also restoring stale remote-tracking bookmarks.
+
+## Rebasing and Remote Changes
+
+Fetch before deciding whether agent-owned feature work needs a new base, but do
+not treat fetched history as material for cleanup. Fetch is not always purely
+additive: jj may abandon local commits that a remote rewrite or deletion leaves
+unreachable. Inspect the resulting graph and operation log when a remote has
+changed history.
 
 ```bash
 jj git fetch
-jj rebase -s <stack-base> -d main@origin
-# All commits in the stack rebase together
-# Update bookmarks if needed, then push
+jj rebase -s <stack-root> -o main@origin
 ```
 
-### After a PR in the Stack is Merged
+Before rebasing a stack onto an updated remote base, inspect active workspaces
+and every descendant of each ancestor that the rebase will rewrite.
 
-When a PR at the base of the stack is merged on GitHub:
+Aliases such as `jj tug` and `jj tush` are configuration-dependent. Inspect
+`jj config list` before relying on their semantics, and treat any alias that
+pushes like a push: ask first. Use jj rather than raw Git commands in a jj
+repository; jj owns the Git-backed graph.
 
-```bash
-jj git fetch                              # Fetch the merge
-jj rebase -s <next-in-stack> -d main@origin  # Rebase remaining stack
-jj bookmark delete <merged-bookmark>      # Clean up merged bookmark
+## Stacked PRs
+
+Stacked PRs are a presentation of a dependency chain. Curate and verify the
+commits first, then place a deliberate bookmark at each PR head.
+
+```text
+main@origin
+  +-- base change          (bookmark, PR 1)
+        +-- dependent API  (bookmark, PR 2)
+              +-- UI       (bookmark, PR 3)
 ```
 
-## Conflict Resolution
-
-Conflicts are recorded in the commit graph, not in your working copy files (until
-you check out the conflicted commit). They're marked with `×` in `jj log`.
+For review feedback in the middle of a mutable stack, create a scratch child of
+the commit to fix, make and verify the correction, then squash it into the
+target. This is authorized when updating that open stack is the assignment;
+otherwise ask before rewriting remotely presented work. Inspect automatically
+rebased descendants and bookmarks afterward.
 
 ```bash
-# Check out the conflicted commit
-jj new <conflicted-id>
+jj new <commit-to-fix>
+# make and verify the fix
+jj squash                   # non-interactive if the scratch child is undescribed
+jj log
+```
 
-# Files now contain conflict markers — resolve them in your editor:
-# <<<<<<< Conflict 1 of 1
-# +++++++ Contents of side #1
-# ...
-# ------- Contents of base
-# ...
-# +++++++ Contents of side #2
-# ...
-# >>>>>>> Conflict 1 of 1 ends
+After a base PR merges, fetch and rebase the remaining agent-owned stack onto
+the new remote base. Use `jj bookmark forget` for local-only cleanup; use
+`jj bookmark delete` only when remote deletion is intended. Either cleanup
+requires appropriate user permission and repository convention.
 
-# After resolving, squash the resolution into the conflicted commit:
+## Conflicts and Divergence
+
+Conflicts live in commits and are marked with `×` in `jj log`. Resolve them in a
+scratch child, verify the result, and squash the resolution into the conflicted
+commit when that commit is within the agent's mutability boundary.
+
+```bash
+jj new <conflicted-revision>
+# resolve and verify
 jj squash
 ```
 
-## Safety Rules
+Parallel workspaces and concurrent rewrites may create divergent changes. Do
+not panic and do not guess which side to discard. Inspect the graph, provenance,
+diffs, workspace ownership, and operation log; coordinate with other active
+agents before choosing a resolution.
 
-- **Always read the graph first.** `jj status` and `jj log` before any
-  operation.
-- **Don't `jj new` without checking status.** The user has almost certainly
-  already created the commit for you. Check before creating another one.
-- **Match the existing commit message style.** Review recent history before
-  writing descriptions.
-- **Never `jj undo` after pushing.** Make forward fixes instead.
-- **Don't mix raw git commands with jj** in the same repo session. Use jj for
-  everything; it manages the git backend.
-- **Don't push without asking.** The user prefers to control when things go to
-  the remote. You can prepare bookmarks and suggest pushing, but let the user
-  pull the trigger.
-- **Divergent bookmarks (`??`) cannot be pushed.** Resolve with
-  `jj bookmark move <name> --to <commit>` first.
+Resolve and verify conflicted commits before pushing. `--allow-conflicts` is an
+explicit exception for unusual workflows, not a routine escape hatch.
 
-## Working with GitHub (`gh` CLI)
-
-The user frequently uses `jj` in tandem with the `gh` GitHub CLI for creating
-PRs, reviewing PR status, checking CI results, and managing issues. Expect to
-combine `jj` graph operations with `gh` commands regularly — they are
-complementary tools, not alternatives.
-
-Useful `gh` commands in the jj workflow:
+## Useful Revsets and Inspection Commands
 
 ```bash
-gh pr list                                # See open PRs
-gh pr view <number>                       # View a specific PR
-gh pr checks <number>                     # Check CI status on a PR
-gh pr create --base <branch> --head <bm>  # Create a PR from a bookmark
-gh pr merge <number> --squash             # Merge a PR (then fetch + rebase locally)
-gh issue list                             # See open issues
-gh issue view <number>                    # View a specific issue
+@                              # current workspace's working-copy commit
+@-                             # parent of @
+::@                            # ancestors of @
+@::                            # descendants of @
+main@origin..@                 # commits ahead of remote main
+bookmarks()                    # bookmarked commits
+description("fix")             # descriptions containing "fix"
+
+jj log -r '::@' --limit 20
+jj show <revision>
+jj diff -r <revision>
+jj workspace list
+jj op log
 ```
 
-### Creating PRs from jj Commits
+The default `jj log` revset may hide commits already present on a remote. Use an
+explicit ancestor or other targeted revset when a commit appears to have
+disappeared.
 
-To create a PR from a jj commit:
+## GitHub (`gh`)
+
+Use `gh` alongside jj for PRs, checks, and issues. They are complementary: jj
+shapes and publishes the commit graph; `gh` manages GitHub objects.
 
 ```bash
-# 1. Push the commit (creates a bookmark automatically if needed)
-jj git push -c <change-id>
-# Note the bookmark name from the output
-
-# 2. Get the default branch
-gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name'
-
-# 3. Create the PR
-gh pr create \
-  --base <default-branch> \
-  --head <bookmark-name> \
-  --title "<first line of jj description>" \
-  --body "<PR description>"
+gh pr list
+gh pr view <number>
+gh pr checks <number>
+gh pr create --base <base> --head <bookmark>
+gh issue list
+gh issue view <number>
 ```
 
-For stacked PRs, set `--base` to the bookmark of the parent PR rather than
-main.
+Before creating a PR:
+
+1. Curate the agent-owned commit graph.
+2. Verify each review unit and inspect the final stack.
+3. Put deliberate bookmarks at the intended PR heads.
+4. Ask before pushing.
+5. Use each commit's first description line as a title candidate. Write a PR
+   body that states scope, rationale, test evidence, and stack dependencies.
+
+For stacked PRs, use the parent PR's bookmark as the child PR's base. Never use
+a scratch commit or incidental bookmark as a PR head.

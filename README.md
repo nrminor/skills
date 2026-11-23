@@ -18,6 +18,7 @@ A small collection of reusable guidance I use with my coding agents. Each skill 
 | [`logging`](skills/logging/SKILL.md)                                                     | Adding useful structured logging based on wide events.                       |
 | [`performance-design`](skills/performance-design/SKILL.md)                               | Preserving a high performance ceiling during architecture and planning.      |
 | [`self-doubt`](skills/self-doubt/SKILL.md)                                               | Stress-testing a proposed solution before committing to it.                  |
+| [`speak-in-code`](skills/speak-in-code/SKILL.md)                                         | Exploring alternative designs through code sketches with minimal prose.     |
 
 ## Installing
 
